@@ -50,7 +50,7 @@ object Session {
         for (l in listeners.toList()) l()
     }
 
-    fun setLane(i: Int) {
+    fun chooseLane(i: Int) {
         lane = i
         if (me == null) cls = Data.DEFAULT_CLASS[i]
         changed()
@@ -62,7 +62,7 @@ object Session {
         changed()
     }
 
-    fun setMe(c: Champ) {
+    fun chooseMe(c: Champ) {
         me = c
         cls = c.k
         changed()

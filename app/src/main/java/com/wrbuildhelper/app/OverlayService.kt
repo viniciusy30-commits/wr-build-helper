@@ -338,7 +338,7 @@ class OverlayService : Service() {
         // Lane
         val lanes = FlowLayout(this, Ui.dp(this, 5f), Ui.dp(this, 5f))
         Data.LANES.forEachIndexed { i, n ->
-            lanes.addView(Ui.chip(this, pal, n, i == Session.lane, true) { Session.setLane(i) })
+            lanes.addView(Ui.chip(this, pal, n, i == Session.lane, true) { Session.chooseLane(i) })
         }
         ct.addView(lanes, Ui.lp())
 

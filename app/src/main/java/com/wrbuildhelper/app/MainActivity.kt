@@ -113,7 +113,7 @@ class MainActivity : AppCompatActivity() {
         meBtn.setPadding(Ui.dp(this, 12f), Ui.dp(this, 9f), Ui.dp(this, 12f), Ui.dp(this, 9f))
         meBtn.background = Ui.rounded(pal.card, Ui.dp(this, 20f).toFloat(), pal.bd, Ui.dp(this, 1f))
         meBtn.setOnClickListener {
-            Picker.show(this) { c -> Session.setMe(c) }
+            Picker.show(this) { c -> Session.chooseMe(c) }
         }
         Ui.pressable(meBtn)
         val mp = Ui.lp(); mp.topMargin = Ui.dp(this, 8f)
@@ -165,7 +165,7 @@ class MainActivity : AppCompatActivity() {
     private fun redraw() {
         lanesBox.removeAllViews()
         Data.LANES.forEachIndexed { i, n ->
-            lanesBox.addView(Ui.chip(this, pal, n, i == Session.lane) { Session.setLane(i) })
+            lanesBox.addView(Ui.chip(this, pal, n, i == Session.lane) { Session.chooseLane(i) })
         }
         classBox.removeAllViews()
         for ((k, label) in Data.ROLE) {
