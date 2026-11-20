@@ -15,6 +15,7 @@ object Session {
 
     fun load(ctx: Context) {
         prefsCtx = ctx.applicationContext
+        Builds.init(ctx)
         if (loaded) return
         loaded = true
         val sp = ctx.applicationContext.getSharedPreferences("session", Context.MODE_PRIVATE)
@@ -43,6 +44,10 @@ object Session {
 
     fun removeListener(l: () -> Unit) {
         listeners.remove(l)
+    }
+
+    fun refresh() {
+        for (l in listeners.toList()) l()
     }
 
     private fun changed() {

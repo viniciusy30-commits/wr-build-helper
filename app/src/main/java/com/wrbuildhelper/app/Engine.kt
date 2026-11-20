@@ -13,7 +13,10 @@ data class Profile(
     val cc: Int,
     val asn: Int,
     val items: List<Item>,
-    val n: Int
+    val n: Int,
+    val src: String = "",
+    val meta: Boolean = false,
+    val runes: List<String> = emptyList()
 )
 
 data class Gank(val l: String, val s: Double, val c: List<Champ>)
@@ -33,9 +36,8 @@ object Engine {
 
     fun ptName(n: String): String = Data.PT[n] ?: n
 
-    fun calc(en: List<Champ?>, cls: Char): Profile? {
+    fun calc(en: List<Champ?>, cls: Char, lane: Int = 2, me: Champ? = null): Profile? {
         val e = en.filterNotNull()
-        if (e.isEmpty()) return null
         var ad = 0.0
         var ap = 0.0
         var tk = 0
@@ -56,7 +58,7 @@ object Engine {
             if (c.c) cc++
             if ("SP".indexOf(c.k) >= 0) asn++
         }
-        val p = ad / (ad + ap)
+        val p = if (e.isEmpty()) 0.5 else ad / (ad + ap)
 
         class Sit(val n: String, val why: String, val sc: Double)
 
@@ -65,6 +67,7 @@ object Engine {
             if (n != null && sits.none { it.n == n }) sits.add(Sit(n, why, sc))
         }
 
+        if (e.isNotEmpty()) {
         if (p >= 0.6) add(Data.ARM[cls], Math.round(p * 100).toString() + "% do dano inimigo é físico", p * 10)
         if (p <= 0.4) add(Data.MR[cls], Math.round((1 - p) * 100).toString() + "% do dano inimigo é mágico", (1 - p) * 10)
         if (p > 0.4 && p < 0.6) {
@@ -74,20 +77,49 @@ object Engine {
         if (tk >= 2) add(Data.PEN[cls], "$tk tanques no time inimigo", 8.0)
         if (hl >= 2) add(Data.HEAL[cls], "$hl inimigos com cura", 7.5)
         if (asn >= 2 && cls != 'T') add(Data.BURST[cls], "$asn assassinos: proteção contra burst", 6.0)
+        }
 
         var boots = Data.BOOT[cls] ?: "Berserker’s Greaves"
         var bw = "padrão da classe"
-        if (cc >= 3 || p <= 0.35) {
+        if (e.isNotEmpty() && (cc >= 3 || p <= 0.35)) {
             boots = "Mercury’s Treads"
             bw = if (cc >= 3) "$cc inimigos com CC pesado" else "time majoritariamente mágico"
-        } else if (p >= 0.65 && e.size >= 3 && cls != 'E') {
+        } else if (e.isNotEmpty() && p >= 0.65 && e.size >= 3 && cls != 'E') {
             boots = "Plated Steelcaps"
             bw = "time majoritariamente físico"
         }
 
         val sorted = sits.sortedByDescending { it.sc }
+        val mb = Builds.get(me?.n, lane)
+        if (mb != null) {
+            // Build do meta do campeão; só as últimas vagas se adaptam ao time inimigo.
+            val mageLike = "MPE".indexOf(cls) >= 0
+            var bn = mb.bootsUp ?: mb.boots
+            var bwhy = "meta do " + me!!.n
+            if (e.isNotEmpty() && (cc >= 3 || p <= 0.35)) {
+                bn = "Mercury’s Treads"
+                bwhy = if (cc >= 3) "$cc inimigos com CC pesado" else "time majoritariamente mágico"
+            } else if (e.isNotEmpty() && p >= 0.65 && e.size >= 3 && !mageLike) {
+                bn = "Plated Steelcaps"
+                bwhy = "time majoritariamente físico"
+            }
+            val bt = if (bn == (mb.bootsUp ?: mb.boots)) 0 else 1
+            val list = mutableListOf(Item(bn, bwhy, bt))
+            val own = mb.items.mapIndexed { ix, nm -> Item(nm, if (ix < mb.core) "meta do " + me.n else "opção popular entre jogadores Diamante+", 0) }.toMutableList()
+            val have = own.map { it.n }.toSet()
+            val picks = sorted.filter { it.n !in have }
+            if (own.size >= 5 && picks.isNotEmpty()) {
+                own[own.size - 1] = Item(picks[0].n, picks[0].why, 2)
+                if (picks.size > 1 && picks[1].sc >= 7.0) own[own.size - 2] = Item(picks[1].n, picks[1].why, 2)
+            } else {
+                for (x in picks.take(2)) if (own.size < 5) own.add(Item(x.n, x.why, 2))
+            }
+            for (x in own) if (list.size < 6 && list.none { it.n == x.n }) list.add(x)
+            return Profile(p, tk, hl, cc, asn, list, e.size, mb.tag + " · " + me.n + " · " + mb.lane, true, mb.runes)
+        }
+
         val items = mutableListOf(Item(boots, bw, 1))
-        val core = (Data.CORE[cls] ?: emptyList()).map { Item(it, "Core da classe", 0) }
+        val core = (Data.CORE[cls] ?: emptyList()).map { Item(it, "Core da classe", 0) }.toMutableList()
         val sit = sorted.map { Item(it.n, it.why, 2) }
         val order = listOfNotNull(
             core.getOrNull(0), core.getOrNull(1),
@@ -98,7 +130,7 @@ object Engine {
         for (x in order) {
             if (items.size < 6 && items.none { it.n == x.n }) items.add(x)
         }
-        return Profile(p, tk, hl, cc, asn, items, e.size)
+        return Profile(p, tk, hl, cc, asn, items, e.size, "Aproximada (por classe)", false)
     }
 
     private fun gankScore(c: Champ): Double {

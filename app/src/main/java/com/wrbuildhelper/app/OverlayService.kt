@@ -226,10 +226,6 @@ class OverlayService : Service() {
         bigger.setPadding(Ui.dp(this, 8f), Ui.dp(this, 6f), Ui.dp(this, 8f), Ui.dp(this, 6f))
         bigger.setOnClickListener { changeScale(1) }
         head.addView(bigger)
-        val stopT = Ui.text(this, "Encerrar", 11.5f, pal.rd)
-        stopT.setPadding(Ui.dp(this, 8f), Ui.dp(this, 6f), Ui.dp(this, 8f), Ui.dp(this, 6f))
-        stopT.setOnClickListener { shutdown() }
-        head.addView(stopT)
         val close = ImageView(this)
         close.setImageDrawable(Ui.icon(this, R.drawable.ic_close, pal.mu))
         close.setPadding(Ui.dp(this, 6f), Ui.dp(this, 6f), Ui.dp(this, 6f), Ui.dp(this, 6f))

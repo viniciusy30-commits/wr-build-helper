@@ -1,0 +1,14 @@
+{
+  "patch": "7.3f",
+  "ver": 1,
+  "fonte": "wr-meta.com (patch 7.3f, atualizado em 20/11/2026)",
+  "champs": {
+    "Vex": {
+      "Meio": {
+        "boots": "Boots of Mana",
+        "bootsUp": "Spellslinger’s Shoes",
+        "items": ["Luden’s Echo", "Infinity Orb", "Rabadon’s Deathcap", "Zhonya’s Hourglass", "Void Staff"]
+      }
+    }
+  }
+}

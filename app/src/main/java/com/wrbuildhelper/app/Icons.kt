@@ -206,6 +206,15 @@ object Icons {
         if (!meta(ctx)) return null
         val id = if (kind == "c") champIds[norm(name)] else itemIds[norm(name)]
         if (id == null) {
+            if (kind == "i") {
+                // Itens que só existem no Wild Rift: ícone do próprio site de meta.
+                val sl = name.lowercase(Locale.ROOT).replace(Regex("[’'.,]"), "").replace(Regex("[^a-z0-9]+"), "-").trim('-')
+                if (download("https://www.riftpatchnotes.com/items/" + sl + ".png", file)) {
+                    val b = BitmapFactory.decodeFile(file.path)
+                    if (b != null) return b
+                    file.delete()
+                }
+            }
             missing.add("$kind:$name")
             return null
         }

@@ -4,6 +4,15 @@
 - Botões A− e A+ no pop-up para diminuir ou aumentar tudo
 - Busca de campeões também dentro do pop-up
 - Ícone novo do app
+- Botão Encerrar removido do pop-up (a notificação ainda tem Parar)
+- A build aparece mesmo sem inimigos escolhidos
+- Builds do meta por campeão e por lane (começando pelo Vex); só as últimas vagas se adaptam ao time inimigo
+- Quem ainda não tem build do meta mostra "Aproximada (por classe)"
+- Qualquer campeão: o app busca na internet as builds do meta (Diamante+) de todas as lanes dele e guarda por 12 horas
+- Build completa: núcleo de 3 itens + opções populares nas vagas 4 e 5, adaptadas ao time inimigo
+- Ícones dos itens exclusivos do Wild Rift
+- Runas do meta (Diamante+) no cartão "Runas", junto da build
+- Se a busca falhar, aparece "Aproximada (por classe)"
 
 #id 2026-11-19-a
 #titulo Pop-up manual com ícones

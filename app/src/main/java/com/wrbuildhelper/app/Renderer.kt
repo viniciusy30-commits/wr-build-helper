@@ -31,12 +31,13 @@ object Renderer {
     fun render(ctx: Context, parent: LinearLayout, pal: Palette, compact: Boolean) {
         parent.removeAllViews()
         val sz = if (compact) 0.88f else 1f
-        val r = Engine.calc(Session.en.toList(), Session.cls) ?: return
+        val r = Engine.calc(Session.en.toList(), Session.cls, Session.lane, Session.me) ?: return
         val g = Engine.ganks(Session.en.toList())
         var idx = 0
 
         // ---- Perfil inimigo
         run {
+            if (r.n == 0) return@run
             val card = Ui.card(ctx, pal)
             val head = LinearLayout(ctx)
             head.gravity = Gravity.CENTER_VERTICAL
@@ -107,7 +108,7 @@ object Renderer {
             head.gravity = Gravity.CENTER_VERTICAL
             head.addView(heading(ctx, pal, "Build sugerida", sz))
             val tp = Ui.lp(); tp.leftMargin = Ui.dp(ctx, 8f)
-            head.addView(tag(ctx, pal, Data.ROLE[Session.cls] ?: "", sz), tp)
+            head.addView(tag(ctx, pal, if (r.src.isNotEmpty()) r.src else (Data.ROLE[Session.cls] ?: ""), sz), tp)
             card.addView(head)
             val isz = if (compact) 38f else 44f
             r.items.forEachIndexed { i, it ->
@@ -141,6 +142,27 @@ object Renderer {
             val fl = FlowLayout(ctx, Ui.dp(ctx, 6f), Ui.dp(ctx, 6f))
             fl.addView(tag(ctx, pal, Data.TIP[Session.cls] ?: "", sz))
             val fp = Ui.lp(); fp.topMargin = Ui.dp(ctx, 8f)
+            card.addView(fl, fp)
+            addCard(ctx, parent, card, idx++, compact)
+        }
+
+        // ---- Runas do meta
+        if (r.runes.isNotEmpty()) {
+            val card = Ui.card(ctx, pal)
+            val head = LinearLayout(ctx)
+            head.gravity = Gravity.CENTER_VERTICAL
+            head.addView(heading(ctx, pal, "Runas", sz))
+            val tp = Ui.lp(); tp.leftMargin = Ui.dp(ctx, 8f)
+            head.addView(tag(ctx, pal, "meta Diamante+", sz), tp)
+            card.addView(head)
+            val fl = FlowLayout(ctx, Ui.dp(ctx, 6f), Ui.dp(ctx, 6f))
+            r.runes.forEachIndexed { i, n ->
+                val t = Ui.text(ctx, n, 13f * sz, if (i == 0) pal.ac else pal.tx, i == 0)
+                t.setPadding(Ui.dp(ctx, 10f), Ui.dp(ctx, 5f), Ui.dp(ctx, 10f), Ui.dp(ctx, 5f))
+                t.background = Ui.rounded(pal.bg, Ui.dp(ctx, 6f).toFloat(), if (i == 0) pal.ac else pal.bd, Ui.dp(ctx, 1f))
+                fl.addView(t)
+            }
+            val fp = Ui.lp(); fp.topMargin = Ui.dp(ctx, 10f)
             card.addView(fl, fp)
             addCard(ctx, parent, card, idx++, compact)
         }
