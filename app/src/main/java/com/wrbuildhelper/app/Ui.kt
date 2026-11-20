@@ -2,7 +2,6 @@ package com.wrbuildhelper.app
 
 import android.animation.ValueAnimator
 import android.content.Context
-import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
@@ -10,28 +9,34 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 
+/** Cores no estilo Wild Rift: preto-azulado "hextech" com dourado. */
 class Palette(
     val bg: Int, val card: Int, val tx: Int, val mu: Int,
-    val ac: Int, val bd: Int, val rd: Int, val gn: Int
+    val ac: Int, val bd: Int, val rd: Int, val gn: Int, val onAc: Int
 ) {
     companion object {
         private fun h(v: Long): Int = v.toInt()
-        val LIGHT = Palette(h(0xFFF4F5F8), h(0xFFFFFFFF), h(0xFF14161C), h(0xFF666677), h(0xFF2F6BFF), h(0xFFDDE1EA), h(0xFFE5484D), h(0xFF18A058))
-        val DARK = Palette(h(0xFF0E1118), h(0xFF181C26), h(0xFFEEF0F5), h(0xFF98A0B3), h(0xFF5B8CFF), h(0xFF2A3040), h(0xFFFF6B70), h(0xFF3ECF86))
-        val OVERLAY = Palette(h(0xF20E1118), h(0xFF181C26), h(0xFFEEF0F5), h(0xFF98A0B3), h(0xFF5B8CFF), h(0xFF2A3040), h(0xFFFF6B70), h(0xFF3ECF86))
+        val WR = Palette(
+            h(0xFF010A13), h(0xFF0A1428), h(0xFFF0E6D2), h(0xFFA09B8C),
+            h(0xFFC8AA6E), h(0xFF5A4A2A), h(0xFFE84057), h(0xFF0AC8B9), h(0xFF010A13)
+        )
+        val OVERLAY = Palette(
+            h(0xF2010A13), h(0xFF0A1428), h(0xFFF0E6D2), h(0xFFA09B8C),
+            h(0xFFC8AA6E), h(0xFF5A4A2A), h(0xFFE84057), h(0xFF0AC8B9), h(0xFF010A13)
+        )
 
-        fun of(ctx: Context): Palette {
-            val night = ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-            return if (night == Configuration.UI_MODE_NIGHT_YES) DARK else LIGHT
-        }
+        @Suppress("UNUSED_PARAMETER")
+        fun of(ctx: Context): Palette = WR
     }
 }
 
@@ -58,6 +63,17 @@ object Ui {
         return t
     }
 
+    /** Título com letra serifada (lembra as fontes do jogo). */
+    fun title(ctx: Context, s: CharSequence, sp: Float, color: Int): TextView {
+        val t = TextView(ctx)
+        t.text = s
+        t.textSize = sp
+        t.setTextColor(color)
+        t.typeface = Typeface.create("serif", Typeface.BOLD)
+        t.letterSpacing = 0.05f
+        return t
+    }
+
     fun icon(ctx: Context, res: Int, tint: Int): Drawable {
         val d = ContextCompat.getDrawable(ctx, res)!!.mutate()
         d.setTint(tint)
@@ -75,12 +91,12 @@ object Ui {
     }
 
     fun chip(ctx: Context, pal: Palette, label: String, on: Boolean, small: Boolean = false, onClick: () -> Unit): TextView {
-        val t = text(ctx, label, if (small) 12f else 13f, if (on) 0xFFFFFFFF.toInt() else pal.tx)
+        val t = text(ctx, label, if (small) 12f else 13f, if (on) pal.onAc else pal.tx, on)
         val ph = dp(ctx, if (small) 9f else 12f)
         val pv = dp(ctx, if (small) 5f else 7f)
         t.setPadding(ph, pv, ph, pv)
-        t.background = if (on) rounded(pal.ac, dp(ctx, 20f).toFloat(), pal.ac, dp(ctx, 1f))
-        else rounded(pal.card, dp(ctx, 20f).toFloat(), pal.bd, dp(ctx, 1f))
+        t.background = if (on) rounded(pal.ac, dp(ctx, 4f).toFloat(), pal.ac, dp(ctx, 1f))
+        else rounded(pal.card, dp(ctx, 4f).toFloat(), pal.bd, dp(ctx, 1f))
         t.setOnClickListener { onClick() }
         pressable(t)
         return t
@@ -90,8 +106,16 @@ object Ui {
         val l = LinearLayout(ctx)
         l.orientation = LinearLayout.VERTICAL
         l.setPadding(dp(ctx, 14f), dp(ctx, 14f), dp(ctx, 14f), dp(ctx, 14f))
-        l.background = rounded(pal.card, dp(ctx, 14f).toFloat(), pal.bd, dp(ctx, 1f))
+        l.background = rounded(pal.card, dp(ctx, 6f).toFloat(), pal.bd, dp(ctx, 1f))
         return l
+    }
+
+    /** Quadradinho tracejado com "+" (espaço vazio de campeão). */
+    fun emptyBox(ctx: Context, pal: Palette, sizeDp: Float): TextView {
+        val t = text(ctx, "+", sizeDp * 0.45f, pal.ac, true)
+        t.gravity = Gravity.CENTER
+        t.background = rounded(pal.card, dp(ctx, 4f).toFloat(), pal.bd, dp(ctx, 1f), true)
+        return t
     }
 
     fun lp(w: Int = ViewGroup.LayoutParams.MATCH_PARENT, h: Int = ViewGroup.LayoutParams.WRAP_CONTENT): LinearLayout.LayoutParams =
@@ -104,7 +128,14 @@ object Ui {
     }
 }
 
-/** Layout que quebra linha automaticamente (para os "chips"). */
+/** ScrollView com altura máxima. */
+class MaxHeightScroll(ctx: Context, private val maxH: Int) : ScrollView(ctx) {
+    override fun onMeasure(w: Int, h: Int) {
+        super.onMeasure(w, MeasureSpec.makeMeasureSpec(maxH, MeasureSpec.AT_MOST))
+    }
+}
+
+/** Layout que quebra linha automaticamente (para os "chips" e grades). */
 class FlowLayout(ctx: Context, private val hGap: Int, private val vGap: Int) : ViewGroup(ctx) {
     override fun onMeasure(wSpec: Int, hSpec: Int) {
         val maxW = MeasureSpec.getSize(wSpec) - paddingLeft - paddingRight

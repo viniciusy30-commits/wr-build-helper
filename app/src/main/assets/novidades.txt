@@ -1,6 +1,12 @@
+#id 2026-11-19-a
+#titulo Pop-up manual com ícones
+- Leitura de tela retirada: agora você escolhe tudo no pop-up
+- No pop-up: lane, classe, seu campeão e os 5 inimigos por grade de ícones
+- Ícones de campeões e itens (baixados da Riot e guardados no celular)
+- Visual novo inspirado em Wild Rift (dourado e azul hextech)
+
 #id 2026-11-17-a
 #titulo Primeira versão em app
 - Build ideal a partir dos 5 inimigos (patch 7.3f)
 - Pop-up flutuante por cima do Wild Rift
-- Leitura de tela para reconhecer os campeões automaticamente
 - Atualização pelo próprio app (Configurações > Verificar atualização)

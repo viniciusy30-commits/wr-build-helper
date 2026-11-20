@@ -13,11 +13,11 @@ import androidx.appcompat.app.AppCompatActivity
 class SettingsActivity : AppCompatActivity() {
 
     private fun button(pal: Palette, label: String, filled: Boolean, onClick: () -> Unit): TextView {
-        val b = Ui.text(this, label, 14f, if (filled) 0xFFFFFFFF.toInt() else pal.tx, true)
+        val b = Ui.text(this, label, 14f, if (filled) pal.onAc else pal.tx, true)
         b.gravity = Gravity.CENTER
         b.setPadding(0, Ui.dp(this, 12f), 0, Ui.dp(this, 12f))
-        b.background = if (filled) Ui.rounded(pal.ac, Ui.dp(this, 12f).toFloat())
-        else Ui.rounded(pal.card, Ui.dp(this, 12f).toFloat(), pal.bd, Ui.dp(this, 1f))
+        b.background = if (filled) Ui.rounded(pal.ac, Ui.dp(this, 6f).toFloat())
+        else Ui.rounded(pal.card, Ui.dp(this, 6f).toFloat(), pal.bd, Ui.dp(this, 1f))
         b.setOnClickListener { onClick() }
         Ui.pressable(b)
         return b

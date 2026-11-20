@@ -8,22 +8,10 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.graphics.Bitmap
 import android.graphics.PixelFormat
-import android.hardware.display.DisplayManager
-import android.hardware.display.VirtualDisplay
-import android.media.Image
-import android.media.ImageReader
-import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
 import android.os.Build
-import android.os.Handler
-import android.os.HandlerThread
 import android.os.IBinder
-import android.os.Looper
-import android.os.SystemClock
 import android.util.DisplayMetrics
-import android.view.Display
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -32,71 +20,35 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 
+/** Bolha flutuante + painel por cima do jogo. Tudo é escolhido manualmente pelo usuário. */
 class OverlayService : Service() {
 
     companion object {
         @Volatile
         var running = false
-        const val EXTRA_CODE = "code"
-        const val EXTRA_DATA = "data"
         const val ACTION_STOP = "com.wrbuildhelper.app.STOP"
         private const val CHANNEL = "overlay"
         private const val NID = 42
-        private const val AUTO_MS = 6000L
-    }
-
-    private class MaxHeightScroll(ctx: Context, private val maxH: Int) : ScrollView(ctx) {
-        override fun onMeasure(w: Int, h: Int) {
-            super.onMeasure(w, MeasureSpec.makeMeasureSpec(maxH, MeasureSpec.AT_MOST))
-        }
+        private const val NONE = -2
+        private const val ME = -1
+        private val SHORT_LANES = listOf("Topo", "Selva", "Meio", "Dragão", "Sup.")
     }
 
     private lateinit var wm: WindowManager
-    private val main = Handler(Looper.getMainLooper())
-    private var capThread: HandlerThread? = null
-    private var capHandler: Handler? = null
-
-    private var projection: MediaProjection? = null
-    private var reader: ImageReader? = null
-    private var vd: VirtualDisplay? = null
-    private var held: Image? = null
-    private var curW = 0
-    private var curH = 0
-    private val lock = Any()
-
     private var bubble: View? = null
     private var panel: LinearLayout? = null
-    private var panelLp: WindowManager.LayoutParams? = null
     private var panelOpen = false
     private var content: LinearLayout? = null
-    private var results: LinearLayout? = null
-    private var statusTv: TextView? = null
-    private var autoChip: TextView? = null
+    private var scrollMax = 0
+    private var panelWidth = 0
+    private var pickTarget = NONE
+    private var closed = false
 
-    private var autoOn = false
-    private var reading = false
-    private var detected: List<Champ> = emptyList()
-    private val pending = LinkedHashSet<String>()
-    private var status = "Abra a seleção de campeões ou a tela de carregamento e toque em Ler tela."
-
-    private val recognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
     private val listener: () -> Unit = { if (panelOpen) refresh() }
-
-    private val autoLoop = object : Runnable {
-        override fun run() {
-            if (!autoOn) return
-            readScreen(true)
-            main.postDelayed(this, AUTO_MS)
-        }
-    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -106,38 +58,12 @@ class OverlayService : Service() {
             return START_NOT_STICKY
         }
         startAsForeground()
-        val code = intent?.getIntExtra(EXTRA_CODE, 0) ?: 0
-        val data: Intent? = readProjectionData(intent)
-        if (data == null || code == 0) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
         if (running) return START_NOT_STICKY
-
-        try {
-            val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            val proj = mpm.getMediaProjection(code, data)
-            proj.registerCallback(object : MediaProjection.Callback() {
-                override fun onStop() {
-                    main.post { shutdown() }
-                }
-            }, main)
-            projection = proj
-        } catch (e: Exception) {
-            Toast.makeText(this, "Não consegui iniciar a captura de tela.", Toast.LENGTH_LONG).show()
-            shutdown()
-            return START_NOT_STICKY
-        }
-
         Session.load(this)
-        val t = HandlerThread("wr-capture")
-        t.start()
-        capThread = t
-        capHandler = Handler(t.looper)
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         try {
-            buildBubble()
             buildPanel()
+            buildBubble()
         } catch (e: Exception) {
             Toast.makeText(this, "Não consegui mostrar a bolha. Confira a permissão de sobreposição.", Toast.LENGTH_LONG).show()
             shutdown()
@@ -146,16 +72,6 @@ class OverlayService : Service() {
         Session.addListener(listener)
         running = true
         return START_NOT_STICKY
-    }
-
-    @Suppress("DEPRECATION")
-    private fun readProjectionData(intent: Intent?): Intent? {
-        if (intent == null) return null
-        return if (Build.VERSION.SDK_INT >= 33) {
-            intent.getParcelableExtra(EXTRA_DATA, Intent::class.java)
-        } else {
-            intent.getParcelableExtra<Intent>(EXTRA_DATA)
-        }
     }
 
     private fun startAsForeground() {
@@ -174,8 +90,8 @@ class OverlayService : Service() {
             .setOngoing(true)
             .addAction(0, "Parar", stop)
             .build()
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(NID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(NID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(NID, n)
         }
@@ -189,12 +105,9 @@ class OverlayService : Service() {
         else WindowManager.LayoutParams.TYPE_PHONE
 
     private fun params(w: Int, h: Int, gravity: Int): WindowManager.LayoutParams {
-        val type = overlayType()
-        // FLAG_SECURE: o próprio pop-up não aparece na captura, então não "atrapalha" a leitura.
         val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_SECURE
-        val p = WindowManager.LayoutParams(w, h, type, flags, PixelFormat.TRANSLUCENT)
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        val p = WindowManager.LayoutParams(w, h, overlayType(), flags, PixelFormat.TRANSLUCENT)
         p.gravity = gravity
         return p
     }
@@ -202,18 +115,18 @@ class OverlayService : Service() {
     @Suppress("DEPRECATION")
     private fun screenSize(): IntArray {
         val dm = DisplayMetrics()
-        val d = (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).getDisplay(Display.DEFAULT_DISPLAY)
-        d.getRealMetrics(dm)
-        return intArrayOf(dm.widthPixels, dm.heightPixels, dm.densityDpi)
+        wm.defaultDisplay.getRealMetrics(dm)
+        return intArrayOf(dm.widthPixels, dm.heightPixels)
     }
 
     private fun buildBubble() {
+        val pal = Palette.OVERLAY
         val size = Ui.dp(this, 52f)
         val fl = FrameLayout(this)
-        fl.background = Ui.rounded(0xFF2F6BFF.toInt(), size / 2f, 0xFFFFFFFF.toInt(), Ui.dp(this, 2f))
+        fl.background = Ui.rounded(pal.bg or 0xFF000000.toInt(), size / 2f, pal.ac, Ui.dp(this, 2f))
         fl.elevation = Ui.dp(this, 6f).toFloat()
         val iv = ImageView(this)
-        iv.setImageDrawable(Ui.icon(this, R.drawable.ic_bolt, 0xFFFFFFFF.toInt()))
+        iv.setImageDrawable(Ui.icon(this, R.drawable.ic_bolt, pal.ac))
         val pad = Ui.dp(this, 12f)
         iv.setPadding(pad, pad, pad, pad)
         fl.addView(iv, FrameLayout.LayoutParams(size, size))
@@ -231,8 +144,10 @@ class OverlayService : Service() {
         fl.setOnTouchListener { _, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    downX = e.rawX; downY = e.rawY
-                    startX = lp.x; startY = lp.y
+                    downX = e.rawX
+                    downY = e.rawY
+                    startX = lp.x
+                    startY = lp.y
                     moved = false
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -258,19 +173,22 @@ class OverlayService : Service() {
     private fun buildPanel() {
         val pal = Palette.OVERLAY
         val sz = screenSize()
-        val w = minOf(Ui.dp(this, 310f), (sz[0] * 0.6f).toInt())
-        val maxScroll = (sz[1] * 0.9f).toInt() - Ui.dp(this, 150f)
+        panelWidth = minOf(Ui.dp(this, 320f), (sz[0] * 0.62f).toInt())
+        scrollMax = (sz[1] * 0.9f).toInt() - Ui.dp(this, 64f)
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        root.background = Ui.rounded(pal.bg, Ui.dp(this, 16f).toFloat(), pal.bd, Ui.dp(this, 1f))
+        root.background = Ui.rounded(pal.bg, Ui.dp(this, 8f).toFloat(), pal.ac, Ui.dp(this, 1f))
         val p = Ui.dp(this, 12f)
-        root.setPadding(p, Ui.dp(this, 10f), p, Ui.dp(this, 10f))
+        root.setPadding(p, Ui.dp(this, 8f), p, Ui.dp(this, 10f))
 
-        // Cabeçalho
         val head = LinearLayout(this)
         head.gravity = Gravity.CENTER_VERTICAL
-        head.addView(Ui.text(this, "WR Build Helper", 14f, pal.tx, true), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        head.addView(Ui.title(this, "WR BUILD HELPER", 13f, pal.ac), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val stopT = Ui.text(this, "Encerrar", 11.5f, pal.rd)
+        stopT.setPadding(Ui.dp(this, 8f), Ui.dp(this, 6f), Ui.dp(this, 8f), Ui.dp(this, 6f))
+        stopT.setOnClickListener { shutdown() }
+        head.addView(stopT)
         val close = ImageView(this)
         close.setImageDrawable(Ui.icon(this, R.drawable.ic_close, pal.mu))
         close.setPadding(Ui.dp(this, 6f), Ui.dp(this, 6f), Ui.dp(this, 6f), Ui.dp(this, 6f))
@@ -278,315 +196,167 @@ class OverlayService : Service() {
         head.addView(close, LinearLayout.LayoutParams(Ui.dp(this, 32f), Ui.dp(this, 32f)))
         root.addView(head)
 
-        // Controles
-        val ctl = FlowLayout(this, Ui.dp(this, 6f), Ui.dp(this, 6f))
-        val read = Ui.chip(this, pal, "Ler tela", true, true) { readScreen(false) }
-        read.setCompoundDrawablesRelativeWithIntrinsicBounds(Ui.icon(this, R.drawable.ic_scan, 0xFFFFFFFF.toInt()), null, null, null)
-        read.compoundDrawablePadding = Ui.dp(this, 6f)
-        ctl.addView(read)
-        val auto = Ui.chip(this, pal, "Auto: desligado", false, true) { toggleAuto() }
-        autoChip = auto
-        ctl.addView(auto)
-        val stopChip = Ui.chip(this, pal, "Encerrar", false, true) { shutdown() }
-        ctl.addView(stopChip)
-        val cp = Ui.lp(); cp.topMargin = Ui.dp(this, 8f)
-        root.addView(ctl, cp)
-
-        val st = Ui.text(this, status, 11.5f, pal.mu)
-        statusTv = st
-        val sp = Ui.lp(); sp.topMargin = Ui.dp(this, 6f)
-        root.addView(st, sp)
-
-        // Conteúdo rolável
-        val scroll = MaxHeightScroll(this, maxScroll)
+        val scroll = MaxHeightScroll(this, scrollMax)
         val ct = LinearLayout(this)
         ct.orientation = LinearLayout.VERTICAL
         scroll.addView(ct, Ui.lp())
         content = ct
-        val scp = Ui.lp(); scp.topMargin = Ui.dp(this, 6f)
-        root.addView(scroll, scp)
+        root.addView(scroll, Ui.lp())
 
-        val lp = params(w, WindowManager.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END)
+        val lp = params(panelWidth, WindowManager.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END)
         lp.x = Ui.dp(this, 8f)
         lp.y = Ui.dp(this, 8f)
         root.visibility = View.GONE
         wm.addView(root, lp)
         panel = root
-        panelLp = lp
     }
 
     private fun togglePanel() {
         val pn = panel ?: return
         panelOpen = !panelOpen
         pn.visibility = if (panelOpen) View.VISIBLE else View.GONE
-        if (panelOpen) refresh()
+        if (panelOpen) {
+            pickTarget = NONE
+            refresh()
+        }
     }
 
-    private fun setStatus(s: String) {
-        status = s
-        statusTv?.text = s
-    }
-
-    /** Recria a parte dinâmica do painel (lanes, detectados, inimigos e resultados). */
     private fun refresh() {
         val ct = content ?: return
-        val pal = Palette.OVERLAY
         ct.removeAllViews()
-        statusTv?.text = status
-        autoChip?.text = if (autoOn) "Auto: ligado" else "Auto: desligado"
+        if (pickTarget == NONE) buildMain(ct) else buildPick(ct)
+    }
 
-        // Lane
+    private fun label(text: String, top: Float): TextView {
+        val pal = Palette.OVERLAY
+        val t = Ui.title(this, text.uppercase(), 10.5f, pal.mu)
+        val lp = Ui.lp()
+        lp.topMargin = Ui.dp(this, top)
+        lp.bottomMargin = Ui.dp(this, 5f)
+        t.layoutParams = lp
+        return t
+    }
+
+    private fun buildMain(ct: LinearLayout) {
+        val pal = Palette.OVERLAY
+
+        ct.addView(label("Minha lane", 4f))
         val lanes = FlowLayout(this, Ui.dp(this, 5f), Ui.dp(this, 5f))
         Data.LANES.forEachIndexed { i, n ->
             lanes.addView(Ui.chip(this, pal, n, i == Session.lane, true) { Session.chooseLane(i) })
         }
         ct.addView(lanes, Ui.lp())
 
-        // Campeões reconhecidos na tela
-        if (detected.isNotEmpty()) {
-            val t = Ui.text(this, "RECONHECIDOS NA TELA (toque nos inimigos)", 10.5f, pal.mu, true)
-            val tp = Ui.lp(); tp.topMargin = Ui.dp(this, 10f); tp.bottomMargin = Ui.dp(this, 5f)
-            ct.addView(t, tp)
-            val fl = FlowLayout(this, Ui.dp(this, 5f), Ui.dp(this, 5f))
-            for (c in detected) {
-                val on = pending.contains(c.n)
-                fl.addView(Ui.chip(this, pal, c.n, on, true) {
-                    if (pending.contains(c.n)) {
-                        pending.remove(c.n)
-                    } else if (pending.size >= 5) {
-                        setStatus("Máximo de 5 inimigos. Desmarque um antes.")
-                        return@chip
-                    } else {
-                        pending.add(c.n)
-                    }
-                    refresh()
-                })
-            }
-            ct.addView(fl, Ui.lp())
-            val apply = Ui.chip(this, pal, "Usar como inimigos (" + pending.size + ")", pending.isNotEmpty(), true) { applyPending() }
-            val ap = Ui.lp(); ap.topMargin = Ui.dp(this, 6f)
-            ct.addView(apply, ap)
+        ct.addView(label("Classe / meu campeão", 10f))
+        val classes = FlowLayout(this, Ui.dp(this, 5f), Ui.dp(this, 5f))
+        for ((k, l) in Data.ROLE) {
+            classes.addView(Ui.chip(this, pal, l, k == Session.cls, true) { Session.setClass(k) })
         }
+        ct.addView(classes, Ui.lp())
 
-        // Inimigos atuais
-        val t2 = Ui.text(this, "INIMIGOS (toque para remover)", 10.5f, pal.mu, true)
-        val t2p = Ui.lp(); t2p.topMargin = Ui.dp(this, 10f); t2p.bottomMargin = Ui.dp(this, 5f)
-        ct.addView(t2, t2p)
-        val slots = FlowLayout(this, Ui.dp(this, 5f), Ui.dp(this, 5f))
+        val me = Session.me
+        val meRow = LinearLayout(this)
+        meRow.gravity = Gravity.CENTER_VERTICAL
+        meRow.background = Ui.rounded(pal.card, Ui.dp(this, 6f).toFloat(), pal.bd, Ui.dp(this, 1f))
+        val mp = Ui.dp(this, 6f)
+        meRow.setPadding(mp, mp, mp, mp)
+        if (me != null) meRow.addView(Icons.champ(this, me.n, 36f), Icons.lp(this, 36f))
+        else meRow.addView(Ui.emptyBox(this, pal, 36f), Icons.lp(this, 36f))
+        val mt = Ui.text(this, if (me != null) me.n + " — trocar" else "Escolher meu campeão (opcional)", 13f, pal.tx, me != null)
+        mt.setPadding(Ui.dp(this, 10f), 0, 0, 0)
+        meRow.addView(mt)
+        meRow.setOnClickListener {
+            pickTarget = ME
+            refresh()
+        }
+        Ui.pressable(meRow)
+        val mrp = Ui.lp()
+        mrp.topMargin = Ui.dp(this, 6f)
+        ct.addView(meRow, mrp)
+
+        ct.addView(label("Inimigos (toque p/ escolher, segure p/ remover)", 12f))
+        val row = LinearLayout(this)
         for (i in 0 until 5) {
             val c = Session.en[i]
-            val label = Data.LANES[i] + ": " + (c?.n ?: "—")
-            slots.addView(Ui.chip(this, pal, label, c != null, true) {
-                if (Session.en[i] != null) Session.setEnemy(i, null)
-            })
+            val tile = LinearLayout(this)
+            tile.orientation = LinearLayout.VERTICAL
+            tile.gravity = Gravity.CENTER_HORIZONTAL
+            val isz = 46f
+            if (c != null) tile.addView(Icons.champ(this, c.n, isz), Icons.lp(this, isz))
+            else tile.addView(Ui.emptyBox(this, pal, isz), Icons.lp(this, isz))
+            val lt = Ui.text(this, SHORT_LANES[i], 10f, pal.ac, true)
+            lt.gravity = Gravity.CENTER
+            tile.addView(lt, Ui.lp())
+            tile.setOnClickListener {
+                pickTarget = i
+                refresh()
+            }
+            tile.setOnLongClickListener {
+                Session.setEnemy(i, null)
+                true
+            }
+            Ui.pressable(tile)
+            row.addView(tile, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
-        ct.addView(slots, Ui.lp())
+        ct.addView(row, Ui.lp())
 
-        // Resultados
+        val clear = Ui.text(this, "Limpar inimigos", 11.5f, pal.rd)
+        clear.setPadding(0, Ui.dp(this, 8f), 0, Ui.dp(this, 4f))
+        clear.setOnClickListener { Session.clearEnemies() }
+        ct.addView(clear)
+
         val res = LinearLayout(this)
         res.orientation = LinearLayout.VERTICAL
         ct.addView(res, Ui.lp())
-        results = res
         Renderer.render(this, res, pal, true)
     }
 
-    private fun applyPending() {
-        val picks = detected.filter { pending.contains(it.n) }.take(5)
-        if (picks.isEmpty()) {
-            setStatus("Marque pelo menos um inimigo.")
-            return
+    private fun buildPick(ct: LinearLayout) {
+        val pal = Palette.OVERLAY
+        val target = pickTarget
+        val head = LinearLayout(this)
+        head.gravity = Gravity.CENTER_VERTICAL
+        val name = if (target == ME) "Meu campeão" else "Inimigo — " + Data.LANES[target]
+        head.addView(Ui.title(this, name.uppercase(), 11.5f, pal.ac), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val hasValue = if (target == ME) Session.me != null else Session.en[target] != null
+        if (target != ME && hasValue) {
+            val rm = Ui.chip(this, pal, "Remover", false, true) {
+                Session.setEnemy(target, null)
+                pickTarget = NONE
+                refresh()
+            }
+            head.addView(rm)
         }
-        Session.setEnemies(Engine.assignLanes(picks))
-        setStatus("Inimigos atualizados. Se alguma lane ficou trocada, remova e ajuste no app.")
-    }
-
-    private fun toggleAuto() {
-        autoOn = !autoOn
-        main.removeCallbacks(autoLoop)
-        if (autoOn) {
-            setStatus("Lendo a tela a cada " + (AUTO_MS / 1000) + "s...")
-            main.post(autoLoop)
-        } else {
-            setStatus("Leitura automática desligada.")
+        val back = Ui.chip(this, pal, "Voltar", false, true) {
+            pickTarget = NONE
+            refresh()
         }
-        if (panelOpen) refresh()
-    }
+        val bp = Ui.lp()
+        bp.leftMargin = Ui.dp(this, 6f)
+        head.addView(back, bp)
+        ct.addView(head, Ui.lp())
 
-    // ---------------- Captura + OCR ----------------
-
-    private fun ensureCapture(w: Int, h: Int, dpi: Int) {
-        synchronized(lock) {
-            if (reader != null && curW == w && curH == h) return
-            val proj = projection ?: return
-            val nr = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 3)
-            nr.setOnImageAvailableListener({ r ->
-                val img = try { r.acquireLatestImage() } catch (e: Exception) { null }
-                if (img != null) {
-                    synchronized(lock) {
-                        if (r === reader) {
-                            held?.close()
-                            held = img
-                        } else {
-                            img.close()
-                        }
-                    }
-                }
-            }, capHandler)
-            held?.close()
-            held = null
-            val old = reader
-            reader = nr
-            val cur = vd
-            if (cur == null) {
-                vd = proj.createVirtualDisplay(
-                    "wr-capture", w, h, dpi,
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, nr.surface, null, capHandler
-                )
-            } else {
-                cur.resize(w, h, dpi)
-                cur.surface = nr.surface
-            }
-            try { old?.close() } catch (e: Exception) { }
-            curW = w
-            curH = h
+        val grid = Picker.build(this, pal, 50f, false, 0) { c ->
+            pickTarget = NONE
+            if (target == ME) Session.chooseMe(c) else Session.setEnemy(target, c)
+            refresh()
         }
-    }
-
-    private fun toBitmap(img: Image): Bitmap {
-        val plane = img.planes[0]
-        val buf = plane.buffer
-        val pixelStride = plane.pixelStride
-        val rowPadding = plane.rowStride - pixelStride * img.width
-        val full = Bitmap.createBitmap(img.width + rowPadding / pixelStride, img.height, Bitmap.Config.ARGB_8888)
-        buf.rewind()
-        full.copyPixelsFromBuffer(buf)
-        if (rowPadding == 0) return full
-        val cropped = Bitmap.createBitmap(full, 0, 0, img.width, img.height)
-        full.recycle()
-        return cropped
-    }
-
-    /** Roda na thread de captura. Entrega null se não conseguir um quadro. */
-    private fun grab(cb: (Bitmap?) -> Unit) {
-        val h = capHandler ?: return
-        try {
-            val s = screenSize()
-            ensureCapture(s[0], s[1], s[2])
-        } catch (e: Exception) {
-            cb(null)
-            return
-        }
-        val deadline = SystemClock.uptimeMillis() + 2500
-        val attempt = object : Runnable {
-            override fun run() {
-                var bmp: Bitmap? = null
-                synchronized(lock) {
-                    val img = held
-                    if (img != null) {
-                        try { bmp = toBitmap(img) } catch (e: Exception) { bmp = null }
-                    }
-                }
-                if (bmp != null) {
-                    cb(bmp)
-                } else if (SystemClock.uptimeMillis() < deadline) {
-                    h.postDelayed(this, 120)
-                } else {
-                    cb(null)
-                }
-            }
-        }
-        attempt.run()
-    }
-
-    private fun readScreen(auto: Boolean) {
-        if (reading || projection == null) return
-        val h = capHandler ?: return
-        reading = true
-        if (!auto) setStatus("Lendo a tela...")
-        val hide = !auto && panelOpen
-        if (hide) panel?.alpha = 0f
-        h.postDelayed({
-            grab { bmp ->
-                main.post { if (hide) panel?.alpha = 1f }
-                if (bmp == null) {
-                    main.post {
-                        reading = false
-                        if (!auto) setStatus("Não consegui capturar a tela. Tente de novo.")
-                        if (panelOpen) refresh()
-                    }
-                } else {
-                    runOcr(bmp, auto)
-                }
-            }
-        }, if (hide) 400L else 0L)
-    }
-
-    private fun runOcr(bmp: Bitmap, auto: Boolean) {
-        recognizer.process(InputImage.fromBitmap(bmp, 0))
-            .addOnSuccessListener { text ->
-                val hits = Matcher.find(text)
-                main.post { onDetected(hits, auto) }
-            }
-            .addOnFailureListener {
-                main.post {
-                    reading = false
-                    if (!auto) setStatus("Falha ao ler o texto da tela.")
-                    if (panelOpen) refresh()
-                }
-            }
-            .addOnCompleteListener {
-                try { bmp.recycle() } catch (e: Exception) { }
-            }
-    }
-
-    private fun onDetected(hits: List<Champ>, auto: Boolean) {
-        reading = false
-        val mine = Session.me?.n
-        val list = hits.filter { it.n != mine }
-        val same = list.map { it.n } == detected.map { it.n }
-        if (auto && same) return
-        detected = list
-        pending.clear()
-        if (list.isEmpty()) {
-            if (!auto) setStatus("Nenhum campeão reconhecido. Abra a seleção de campeões ou a tela de carregamento e tente de novo.")
-        } else {
-            if (list.size <= 5) list.forEach { pending.add(it.n) }
-            setStatus("Achei " + list.size + " campeão(ões). Toque nos que são inimigos e em Usar como inimigos.")
-            if (auto && list.size <= 5 && Session.en.all { it == null }) {
-                applyPending()
-                return
-            }
-        }
-        if (panelOpen) refresh()
+        val gp = Ui.lp()
+        gp.topMargin = Ui.dp(this, 8f)
+        ct.addView(grid, gp)
     }
 
     // ---------------- Encerramento ----------------
-
-    private var closed = false
 
     private fun shutdown() {
         if (closed) return
         closed = true
         running = false
-        autoOn = false
-        main.removeCallbacksAndMessages(null)
         Session.removeListener(listener)
         try { bubble?.let { wm.removeView(it) } } catch (e: Exception) { }
         try { panel?.let { wm.removeView(it) } } catch (e: Exception) { }
         bubble = null
         panel = null
-        synchronized(lock) {
-            try { held?.close() } catch (e: Exception) { }
-            held = null
-            try { vd?.release() } catch (e: Exception) { }
-            vd = null
-            try { reader?.close() } catch (e: Exception) { }
-            reader = null
-        }
-        try { projection?.stop() } catch (e: Exception) { }
-        projection = null
-        capThread?.quitSafely()
-        capThread = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }

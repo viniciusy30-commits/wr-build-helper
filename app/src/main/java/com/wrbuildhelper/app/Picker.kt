@@ -1,77 +1,117 @@
 package com.wrbuildhelper.app
 
 import android.content.Context
-import android.view.ViewGroup
+import android.text.TextUtils
+import android.view.Gravity
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.widget.doAfterTextChanged
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.util.Locale
 
-/** Janela de busca de campeões. */
+/** Grade de campeões com ícones (estilo tela de seleção do Wild Rift). */
 object Picker {
-    private class VH(val row: LinearLayout, val name: TextView, val role: TextView) : RecyclerView.ViewHolder(row)
 
-    private class Adapter(
-        private val ctx: Context,
-        private val pal: Palette,
-        private val onPick: (Champ) -> Unit
-    ) : RecyclerView.Adapter<VH>() {
-        var items: List<Champ> = Engine.champs
+    private fun cell(ctx: Context, pal: Palette, c: Champ, sizeDp: Float, onPick: (Champ) -> Unit): LinearLayout {
+        val box = LinearLayout(ctx)
+        box.orientation = LinearLayout.VERTICAL
+        box.gravity = Gravity.CENTER_HORIZONTAL
+        box.addView(Icons.champ(ctx, c.n, sizeDp), Icons.lp(ctx, sizeDp))
+        val t: TextView = Ui.text(ctx, c.n, 10f, pal.tx)
+        t.gravity = Gravity.CENTER
+        t.maxLines = 1
+        t.setSingleLine(true)
+        t.ellipsize = TextUtils.TruncateAt.END
+        box.addView(t, LinearLayout.LayoutParams(Ui.dp(ctx, sizeDp + 4f), LinearLayout.LayoutParams.WRAP_CONTENT))
+        box.setOnClickListener { onPick(c) }
+        Ui.pressable(box)
+        return box
+    }
 
-        fun filter(q: String) {
-            val f = q.trim().lowercase(Locale.ROOT)
-            items = if (f.isEmpty()) Engine.champs else Engine.champs.filter { it.n.lowercase(Locale.ROOT).contains(f) }
-            notifyDataSetChanged()
+    /**
+     * Monta a grade. scrollMaxPx > 0: a grade tem rolagem própria (diálogo do app).
+     * scrollMaxPx = 0: sem rolagem própria (o pop-up já rola por fora).
+     */
+    fun build(
+        ctx: Context, pal: Palette, cellDp: Float, withSearch: Boolean,
+        scrollMaxPx: Int, onPick: (Champ) -> Unit
+    ): LinearLayout {
+        val box = LinearLayout(ctx)
+        box.orientation = LinearLayout.VERTICAL
+        var filter: Char? = null
+        var query = ""
+        val grid = FlowLayout(ctx, Ui.dp(ctx, 6f), Ui.dp(ctx, 8f))
+        val chips = FlowLayout(ctx, Ui.dp(ctx, 5f), Ui.dp(ctx, 5f))
+
+        fun rebuildGrid() {
+            grid.removeAllViews()
+            val q = query.trim().lowercase(Locale.ROOT)
+            for (c in Engine.champs) {
+                if (filter != null && c.k != filter) continue
+                if (q.isNotEmpty() && !c.n.lowercase(Locale.ROOT).contains(q)) continue
+                grid.addView(cell(ctx, pal, c, cellDp, onPick))
+            }
         }
 
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-            val row = LinearLayout(ctx)
-            row.layoutParams = RecyclerView.LayoutParams(RecyclerView.LayoutParams.MATCH_PARENT, RecyclerView.LayoutParams.WRAP_CONTENT)
-            val p = Ui.dp(ctx, 12f)
-            row.setPadding(Ui.dp(ctx, 4f), p, Ui.dp(ctx, 4f), p)
-            val n = Ui.text(ctx, "", 15f, pal.tx)
-            val r = Ui.text(ctx, "", 12f, pal.mu)
-            row.addView(n, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            row.addView(r)
-            return VH(row, n, r)
+        fun rebuildChips() {
+            chips.removeAllViews()
+            chips.addView(Ui.chip(ctx, pal, "Todos", filter == null, true) {
+                filter = null
+                rebuildChips()
+                rebuildGrid()
+            })
+            for ((k, label) in Data.ROLE) {
+                chips.addView(Ui.chip(ctx, pal, label, filter == k, true) {
+                    filter = k
+                    rebuildChips()
+                    rebuildGrid()
+                })
+            }
         }
 
-        override fun onBindViewHolder(holder: VH, position: Int) {
-            val c = items[position]
-            holder.name.text = c.n
-            holder.role.text = Data.ROLE[c.k] ?: ""
-            holder.row.setOnClickListener { onPick(c) }
+        if (withSearch) {
+            val et = EditText(ctx)
+            et.hint = "Buscar campeão..."
+            et.setSingleLine(true)
+            et.setTextColor(pal.tx)
+            et.setHintTextColor(pal.mu)
+            et.textSize = 14f
+            val p = Ui.dp(ctx, 10f)
+            et.setPadding(p, p, p, p)
+            et.background = Ui.rounded(pal.card, Ui.dp(ctx, 4f).toFloat(), pal.bd, Ui.dp(ctx, 1f))
+            et.doAfterTextChanged {
+                query = it?.toString() ?: ""
+                rebuildGrid()
+            }
+            box.addView(et, Ui.lp())
         }
-
-        override fun getItemCount(): Int = items.size
+        val cp = Ui.lp()
+        cp.topMargin = Ui.dp(ctx, 8f)
+        cp.bottomMargin = Ui.dp(ctx, 8f)
+        box.addView(chips, cp)
+        rebuildChips()
+        rebuildGrid()
+        if (scrollMaxPx > 0) {
+            val sc = MaxHeightScroll(ctx, scrollMaxPx)
+            sc.addView(grid, Ui.lp())
+            box.addView(sc, Ui.lp())
+        } else {
+            box.addView(grid, Ui.lp())
+        }
+        return box
     }
 
     fun show(ctx: Context, onPick: (Champ) -> Unit) {
         val pal = Palette.of(ctx)
-        val box = LinearLayout(ctx)
-        box.orientation = LinearLayout.VERTICAL
-        val pad = Ui.dp(ctx, 16f)
-        box.setPadding(pad, pad / 2, pad, 0)
-        val et = EditText(ctx)
-        et.hint = "Buscar campeão..."
-        et.setSingleLine(true)
-        et.setTextColor(pal.tx)
-        et.setHintTextColor(pal.mu)
-        box.addView(et, Ui.lp())
-        val rv = RecyclerView(ctx)
-        rv.layoutManager = LinearLayoutManager(ctx)
         var dlgRef: androidx.appcompat.app.AlertDialog? = null
-        val adapter = Adapter(ctx, pal) { c ->
+        val h = (ctx.resources.displayMetrics.heightPixels * 0.55f).toInt()
+        val box = build(ctx, pal, 56f, true, h) { c ->
             dlgRef?.dismiss()
             onPick(c)
         }
-        rv.adapter = adapter
-        box.addView(rv, Ui.lp(h = Ui.dp(ctx, 380f)))
-        et.doAfterTextChanged { adapter.filter(it?.toString() ?: "") }
+        val pad = Ui.dp(ctx, 16f)
+        box.setPadding(pad, Ui.dp(ctx, 8f), pad, 0)
         val dlg = MaterialAlertDialogBuilder(ctx)
             .setTitle("Escolher campeão")
             .setView(box)
