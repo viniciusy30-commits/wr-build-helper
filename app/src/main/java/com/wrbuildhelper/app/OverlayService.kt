@@ -8,6 +8,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
+import android.content.res.Resources
+import android.graphics.Outline
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
@@ -16,6 +19,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -35,6 +39,7 @@ class OverlayService : Service() {
         private const val NID = 42
         private const val NONE = -2
         private const val ME = -1
+        private val SCALES = floatArrayOf(0.55f, 0.7f, 0.85f, 1f, 1.15f, 1.3f)
         private val SHORT_LANES = listOf("Topo", "Selva", "Meio", "Dragão", "Sup.")
     }
 
@@ -47,6 +52,26 @@ class OverlayService : Service() {
     private var panelWidth = 0
     private var pickTarget = NONE
     private var closed = false
+    private var scaleIdx = 3
+    private var scaledRes: Resources? = null
+    private var scaledFor = -1
+    private var bx = -1
+    private var by = -1
+    private var panelLp: WindowManager.LayoutParams? = null
+    private var panelFocusable = false
+
+    /** Faz tudo que o pop-up desenha (dp e sp) acompanhar o tamanho escolhido pelo usuário. */
+    override fun getResources(): Resources {
+        val base = super.getResources()
+        if (scaleIdx == 3) return base
+        if (scaledRes == null || scaledFor != scaleIdx) {
+            val cfg = Configuration(base.configuration)
+            cfg.densityDpi = (base.configuration.densityDpi * SCALES[scaleIdx]).toInt().coerceAtLeast(60)
+            scaledRes = baseContext.createConfigurationContext(cfg).resources
+            scaledFor = scaleIdx
+        }
+        return scaledRes ?: base
+    }
 
     private val listener: () -> Unit = { if (panelOpen) refresh() }
 
@@ -60,6 +85,7 @@ class OverlayService : Service() {
         startAsForeground()
         if (running) return START_NOT_STICKY
         Session.load(this)
+        scaleIdx = getSharedPreferences("ov", Context.MODE_PRIVATE).getInt("scale", 3).coerceIn(0, SCALES.size - 1)
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         try {
             buildPanel()
@@ -126,14 +152,19 @@ class OverlayService : Service() {
         fl.background = Ui.rounded(pal.bg or 0xFF000000.toInt(), size / 2f, pal.ac, Ui.dp(this, 2f))
         fl.elevation = Ui.dp(this, 6f).toFloat()
         val iv = ImageView(this)
-        iv.setImageDrawable(Ui.icon(this, R.drawable.ic_bolt, pal.ac))
-        val pad = Ui.dp(this, 12f)
-        iv.setPadding(pad, pad, pad, pad)
+        iv.setImageResource(R.mipmap.ic_launcher)
+        iv.scaleType = ImageView.ScaleType.CENTER_CROP
         fl.addView(iv, FrameLayout.LayoutParams(size, size))
+        fl.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setOval(0, 0, view.width, view.height)
+            }
+        }
+        fl.clipToOutline = true
 
         val lp = params(size, size, Gravity.TOP or Gravity.START)
-        lp.x = Ui.dp(this, 8f)
-        lp.y = Ui.dp(this, 90f)
+        lp.x = if (bx >= 0) bx else Ui.dp(this, 8f)
+        lp.y = if (by >= 0) by else Ui.dp(this, 90f)
 
         val slop = ViewConfiguration.get(this).scaledTouchSlop
         var downX = 0f
@@ -157,6 +188,8 @@ class OverlayService : Service() {
                     if (moved) {
                         lp.x = startX + dx.toInt()
                         lp.y = startY + dy.toInt()
+                        bx = lp.x
+                        by = lp.y
                         try { wm.updateViewLayout(fl, lp) } catch (ex: Exception) { }
                     }
                 }
@@ -174,7 +207,7 @@ class OverlayService : Service() {
         val pal = Palette.OVERLAY
         val sz = screenSize()
         panelWidth = minOf(Ui.dp(this, 320f), (sz[0] * 0.62f).toInt())
-        scrollMax = (sz[1] * 0.9f).toInt() - Ui.dp(this, 64f)
+        scrollMax = (sz[1] - Ui.dp(this, 96f)).coerceAtLeast(Ui.dp(this, 120f))
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
@@ -185,6 +218,14 @@ class OverlayService : Service() {
         val head = LinearLayout(this)
         head.gravity = Gravity.CENTER_VERTICAL
         head.addView(Ui.title(this, "WR BUILD HELPER", 13f, pal.ac), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val smaller = Ui.text(this, "A−", 13f, pal.ac, true)
+        smaller.setPadding(Ui.dp(this, 8f), Ui.dp(this, 6f), Ui.dp(this, 8f), Ui.dp(this, 6f))
+        smaller.setOnClickListener { changeScale(-1) }
+        head.addView(smaller)
+        val bigger = Ui.text(this, "A+", 13f, pal.ac, true)
+        bigger.setPadding(Ui.dp(this, 8f), Ui.dp(this, 6f), Ui.dp(this, 8f), Ui.dp(this, 6f))
+        bigger.setOnClickListener { changeScale(1) }
+        head.addView(bigger)
         val stopT = Ui.text(this, "Encerrar", 11.5f, pal.rd)
         stopT.setPadding(Ui.dp(this, 8f), Ui.dp(this, 6f), Ui.dp(this, 8f), Ui.dp(this, 6f))
         stopT.setOnClickListener { shutdown() }
@@ -206,15 +247,59 @@ class OverlayService : Service() {
         val lp = params(panelWidth, WindowManager.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END)
         lp.x = Ui.dp(this, 8f)
         lp.y = Ui.dp(this, 8f)
-        root.visibility = View.GONE
+        lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        root.visibility = if (panelOpen) View.VISIBLE else View.GONE
+        panelFocusable = false
+        panelLp = lp
         wm.addView(root, lp)
         panel = root
+    }
+
+    private fun changeScale(d: Int) {
+        val n = (scaleIdx + d).coerceIn(0, SCALES.size - 1)
+        if (n == scaleIdx) return
+        scaleIdx = n
+        getSharedPreferences("ov", Context.MODE_PRIVATE).edit().putInt("scale", n).apply()
+        rebuildViews()
+    }
+
+    private fun rebuildViews() {
+        try { bubble?.let { wm.removeView(it) } } catch (e: Exception) { }
+        try { panel?.let { wm.removeView(it) } } catch (e: Exception) { }
+        bubble = null
+        panel = null
+        buildPanel()
+        buildBubble()
+        if (panelOpen) refresh()
+    }
+
+    /** Girou a tela (vertical/horizontal): refaz o pop-up para caber na nova altura. */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (!running || closed) return
+        scaledRes = null
+        scaledFor = -1
+        bx = -1
+        by = -1
+        rebuildViews()
+    }
+
+    /** O campo de busca só funciona (teclado) se a janela puder receber foco. */
+    private fun setPanelFocusable(on: Boolean) {
+        val lp = panelLp ?: return
+        val pn = panel ?: return
+        if (on == panelFocusable) return
+        panelFocusable = on
+        lp.flags = if (on) WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        try { wm.updateViewLayout(pn, lp) } catch (e: Exception) { }
     }
 
     private fun togglePanel() {
         val pn = panel ?: return
         panelOpen = !panelOpen
         pn.visibility = if (panelOpen) View.VISIBLE else View.GONE
+        if (!panelOpen) setPanelFocusable(false)
         if (panelOpen) {
             pickTarget = NONE
             refresh()
@@ -224,6 +309,7 @@ class OverlayService : Service() {
     private fun refresh() {
         val ct = content ?: return
         ct.removeAllViews()
+        setPanelFocusable(pickTarget != NONE)
         if (pickTarget == NONE) buildMain(ct) else buildPick(ct)
     }
 
@@ -336,7 +422,7 @@ class OverlayService : Service() {
         head.addView(back, bp)
         ct.addView(head, Ui.lp())
 
-        val grid = Picker.build(this, pal, 50f, false, 0) { c ->
+        val grid = Picker.build(this, pal, 50f, true, 0) { c ->
             pickTarget = NONE
             if (target == ME) Session.chooseMe(c) else Session.setEnemy(target, c)
             refresh()

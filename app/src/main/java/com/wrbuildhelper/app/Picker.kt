@@ -46,10 +46,10 @@ object Picker {
 
         fun rebuildGrid() {
             grid.removeAllViews()
-            val q = query.trim().lowercase(Locale.ROOT)
+            val q = query.lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
             for (c in Engine.champs) {
                 if (filter != null && c.k != filter) continue
-                if (q.isNotEmpty() && !c.n.lowercase(Locale.ROOT).contains(q)) continue
+                if (q.isNotEmpty() && !c.n.lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }.contains(q)) continue
                 grid.addView(cell(ctx, pal, c, cellDp, onPick))
             }
         }

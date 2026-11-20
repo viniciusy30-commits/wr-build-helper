@@ -1,3 +1,10 @@
+#id 2026-11-20-a
+#titulo Pop-up com ícone do app, tamanho ajustável e busca
+- A bolha agora usa o ícone do app
+- Botões A− e A+ no pop-up para diminuir ou aumentar tudo
+- Busca de campeões também dentro do pop-up
+- Ícone novo do app
+
 #id 2026-11-19-a
 #titulo Pop-up manual com ícones
 - Leitura de tela retirada: agora você escolhe tudo no pop-up
