@@ -158,20 +158,35 @@ object Builds {
 
     private fun runesIn(seg: String): List<String> {
         val out = ArrayList<String>()
+        val names = HashSet<String>()
         val img = Regex("<img[^>]*>")
         val alt = Regex("alt=\"([^\"]*)\"")
         val src = Regex("src=\"([^\"]*)\"")
         for (m in img.findAll(seg)) {
             val tag = m.value
-            if (!tag.contains("/runes/") && !tag.contains("/perks/")) continue
+            if (!tag.contains("/runes/") && !tag.contains("/perks/") && !tag.contains("runes%2F")) continue
+            var raw = src.find(tag)?.groupValues?.get(1)?.replace("&amp;", "&") ?: ""
+            if (raw.contains("url=")) {
+                try {
+                    raw = java.net.URLDecoder.decode(raw.substringAfter("url=").substringBefore("&"), "UTF-8")
+                } catch (e: Exception) { }
+            }
+            val url = when {
+                raw.isEmpty() -> ""
+                raw.startsWith("http") -> raw
+                raw.startsWith("//") -> "https:" + raw
+                raw.startsWith("/") -> "https://www.riftpatchnotes.com" + raw
+                else -> "https://www.riftpatchnotes.com/" + raw
+            }
             var name = alt.find(tag)?.groupValues?.get(1)?.let { unescape(it) } ?: ""
             if (name.isEmpty()) {
-                val f = src.find(tag)?.groupValues?.get(1) ?: continue
-                name = f.substringAfterLast('/').substringBefore('.').substringBefore('?')
+                if (raw.isEmpty()) continue
+                name = raw.substringAfterLast('/').substringBefore('.').substringBefore('?')
                     .replace(Regex("[-_]+"), " ").trim()
                     .split(" ").joinToString(" ") { w -> w.replaceFirstChar { c -> c.uppercase() } }
             }
-            if (name.isNotEmpty() && !out.contains(name)) out.add(name)
+            name = name.replace("|", " ")
+            if (name.isNotEmpty() && names.add(name)) out.add(if (url.isEmpty()) name else "$name|$url")
         }
         return out.take(9)
     }
@@ -266,7 +281,7 @@ object Builds {
         val cands = slugs(champ)
         // cache em disco (válido por 12 horas)
         try {
-            val f = File(File(ctx.filesDir, "rpn3"), cands[0] + ".json")
+            val f = File(File(ctx.filesDir, "rpn4"), cands[0] + ".json")
             if (f.exists()) {
                 val j = JSONObject(f.readText())
                 if (System.currentTimeMillis() - j.optLong("t", 0) < 12 * 3600 * 1000L) {
@@ -291,7 +306,7 @@ object Builds {
                     val html = con.inputStream.bufferedReader().use { it.readText() }
                     val l = parse(html)
                     if (l.isEmpty()) continue
-                    val dir = File(ctx.filesDir, "rpn3")
+                    val dir = File(ctx.filesDir, "rpn4")
                     dir.mkdirs()
                     File(dir, cands[0] + ".json").writeText(toJson(l).toString())
                     remoteOk[champ] = l

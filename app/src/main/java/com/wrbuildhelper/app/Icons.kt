@@ -75,7 +75,9 @@ object Icons {
 
     fun item(ctx: Context, name: String, sizeDp: Float): ImageView = make(ctx, "i", name)
 
-    private fun make(ctx: Context, kind: String, name: String): ImageView {
+    fun rune(ctx: Context, name: String, url: String?): ImageView = make(ctx, "r", name, url)
+
+    private fun make(ctx: Context, kind: String, name: String, url: String? = null): ImageView {
         val pal = Palette.WR
         val iv = ImageView(ctx)
         iv.scaleType = ImageView.ScaleType.CENTER_CROP
@@ -84,11 +86,11 @@ object Icons {
         iv.setPadding(pad, pad, pad, pad)
         iv.outlineProvider = ViewOutlineProvider.BACKGROUND
         iv.clipToOutline = true
-        load(ctx, kind, name, iv)
+        load(ctx, kind, name, iv, url)
         return iv
     }
 
-    private fun load(ctx: Context, kind: String, name: String, iv: ImageView) {
+    private fun load(ctx: Context, kind: String, name: String, iv: ImageView, url: String? = null) {
         val key = "$kind:$name"
         iv.tag = key
         val cached = mem.get(key)
@@ -102,7 +104,7 @@ object Icons {
         if (missing.contains(key)) return
         val app = ctx.applicationContext
         pool.execute {
-            val bmp = try { fetch(app, kind, name) } catch (e: Exception) { null }
+            val bmp = try { fetch(app, kind, name, url) } catch (e: Exception) { null }
             if (bmp != null) {
                 mem.put(key, bmp)
                 main.post { if (iv.tag == key) iv.setImageBitmap(bmp) }
@@ -196,12 +198,21 @@ object Icons {
         }
     }
 
-    private fun fetch(ctx: Context, kind: String, name: String): Bitmap? {
+    private fun fetch(ctx: Context, kind: String, name: String, url: String? = null): Bitmap? {
         val file = File(File(ctx.filesDir, "icons"), kind + "-" + norm(name) + ".png")
         if (file.exists()) {
             val b = BitmapFactory.decodeFile(file.path)
             if (b != null) return b
             file.delete()
+        }
+        if (kind == "r") {
+            if (url.isNullOrEmpty()) return null
+            if (download(url, file)) {
+                val b = BitmapFactory.decodeFile(file.path)
+                if (b != null) return b
+                file.delete()
+            }
+            return null
         }
         if (!meta(ctx)) return null
         val id = if (kind == "c") champIds[norm(name)] else itemIds[norm(name)]

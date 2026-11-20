@@ -156,11 +156,21 @@ object Renderer {
             head.addView(tag(ctx, pal, "meta Diamante+", sz), tp)
             card.addView(head)
             val fl = FlowLayout(ctx, Ui.dp(ctx, 6f), Ui.dp(ctx, 6f))
-            r.runes.forEachIndexed { i, n ->
-                val t = Ui.text(ctx, n, 13f * sz, if (i == 0) pal.ac else pal.tx, i == 0)
-                t.setPadding(Ui.dp(ctx, 10f), Ui.dp(ctx, 5f), Ui.dp(ctx, 10f), Ui.dp(ctx, 5f))
-                t.background = Ui.rounded(pal.bg, Ui.dp(ctx, 6f).toFloat(), if (i == 0) pal.ac else pal.bd, Ui.dp(ctx, 1f))
-                fl.addView(t)
+            r.runes.forEachIndexed { i, entry ->
+                val name = entry.substringBefore('|')
+                val url = if (entry.contains('|')) entry.substringAfter('|') else null
+                val chip = LinearLayout(ctx)
+                chip.gravity = Gravity.CENTER_VERTICAL
+                chip.setPadding(Ui.dp(ctx, 6f), Ui.dp(ctx, 5f), Ui.dp(ctx, 10f), Ui.dp(ctx, 5f))
+                chip.background = Ui.rounded(pal.bg, Ui.dp(ctx, 6f).toFloat(), if (i == 0) pal.ac else pal.bd, Ui.dp(ctx, 1f))
+                val rs = (if (i == 0) 40f else 30f) * (if (compact) 0.88f else 1f)
+                if (url != null) {
+                    val ic = Icons.rune(ctx, name, url)
+                    val icp = Icons.lp(ctx, rs); icp.rightMargin = Ui.dp(ctx, 8f)
+                    chip.addView(ic, icp)
+                }
+                chip.addView(Ui.text(ctx, name, 13f * sz, if (i == 0) pal.ac else pal.tx, i == 0))
+                fl.addView(chip)
             }
             val fp = Ui.lp(); fp.topMargin = Ui.dp(ctx, 10f)
             card.addView(fl, fp)
