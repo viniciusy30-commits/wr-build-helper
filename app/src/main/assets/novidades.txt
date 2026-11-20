@@ -1,0 +1,6 @@
+#id 2026-11-17-a
+#titulo Primeira versão em app
+- Build ideal a partir dos 5 inimigos (patch 7.3f)
+- Pop-up flutuante por cima do Wild Rift
+- Leitura de tela para reconhecer os campeões automaticamente
+- Atualização pelo próprio app (Configurações > Verificar atualização)
